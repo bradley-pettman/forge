@@ -1,0 +1,45 @@
+{
+  "name": "forge-cli",
+  "version": "0.1.0",
+  "description": "Agent orchestration CLI — from requirements to merged PRs",
+  "type": "module",
+  "bin": {
+    "forge": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --dts",
+    "dev": "tsup src/cli.ts --format esm --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "cli",
+    "agent",
+    "orchestration",
+    "ai"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^14.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.2.3",
+    "better-sqlite3": "^12.6.2",
+    "eslint": "^10.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
