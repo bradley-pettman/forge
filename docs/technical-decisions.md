@@ -2,7 +2,7 @@
 
 A record of key technical decisions and their rationale.
 
-Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestration Systems]]
+Related: [Forge - Implementation Outline](./implementation-outline.md) | [Key Components of Agent Orchestration Systems](./key-components.md)
 
 ---
 
@@ -18,7 +18,7 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 - Node's async model handles concurrent agent coordination without additional complexity
 
 **Alternatives Considered:**
-- **Go** — what [[Gas Town]] and [[Beads]] use. Better binary distribution and concurrency primitives, but those advantages matter less for a personal tool that runs from source. The language familiarity tradeoff tips the balance to TypeScript.
+- **Go** — what Gas Town and Beads use. Better binary distribution and concurrency primitives, but those advantages matter less for a personal tool that runs from source. The language familiarity tradeoff tips the balance to TypeScript.
 
 ---
 
@@ -52,7 +52,7 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 
 **Alternatives Considered:**
 - **Pure JSONL** — portable but too slow for queries at scale; no indexing
-- **Dolt** — what [[Beads]] uses. Overkill for this scope and adds a complex dependency
+- **Dolt** — what Beads uses. Overkill for this scope and adds a complex dependency
 - **Plain SQLite without JSONL** — fast for queries but loses git portability; tasks become invisible to normal git workflows
 
 ---
@@ -79,7 +79,7 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 **Decision:** tmux as the primary UI for managing agent sessions, with a richer dashboard as a future enhancement.
 
 **Rationale:**
-- Proven by [[Gas Town]] — the model works in practice
+- Proven by Gas Town — the model works in practice
 - Low barrier to entry: only a handful of tmux commands are needed to get value
 - Sessions survive terminal disconnects — critical for long-running agent pipelines
 - Scriptable and customizable without building custom UI infrastructure
@@ -115,7 +115,7 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 - The developer is currently at roughly "stage 5" (single CLI agent) and wants to reach stage 6–7
 - The bottleneck is the pipeline from a vague issue to a merged PR — not raw throughput
 - The system should be immediately useful with 2–3 agents and scale up gracefully as confidence grows
-- [[Gas Town]]'s full supervision hierarchy (Deacon, Dogs, Boot) is unnecessary at this scale initially; adding it prematurely would add complexity without proportional benefit
+- Gas Town's full supervision hierarchy (Deacon, Dogs, Boot) is unnecessary at this scale initially; adding it prematurely would add complexity without proportional benefit
 - Getting the pipeline right is the hard problem; parallelism is a scaling concern to solve once the pipeline works
 
 **Alternatives Considered:**
@@ -125,7 +125,7 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 
 ## 8. Relationship to Maestro: Peer Package, Not Child
 
-**Decision:** Forge is a peer of the existing [[Maestro]] package, not a component within it.
+**Decision:** Forge is a peer of the existing Maestro package, not a component within it.
 
 **Rationale:**
 - Maestro is runtime infrastructure — cache, database, queues, email — things the application uses at execution time while serving users
@@ -136,3 +136,107 @@ Related: [[Forge - Implementation Outline]] | [[Key Components of Agent Orchestr
 
 **Alternatives Considered:**
 - **Forge as a Maestro sub-package** — conceptually wrong. Maestro has no business knowing about agent orchestration, and Forge has no business being coupled to production runtime infrastructure. The coupling would limit both.
+
+---
+
+## 9. Issue Tracker: Provider Abstraction with GitHub as Default
+
+**Decision:** Forge is not coupled to GitHub Issues. A provider interface allows Linear, Jira, or no tracker at all.
+
+**Rationale:**
+- Different teams use different issue trackers; Forge should work with any of them
+- The `none` provider is important — it allows Forge to work without any issue tracker integration, for personal projects or when you just want to use the pipeline manually
+- A provider interface keeps the core system clean and decoupled from any specific tracker's API
+
+**Interface:**
+
+```typescript
+interface IssueTrackerProvider {
+  name: string;
+  getIssue(id: string): Promise<Issue>;
+  getIssueComments(id: string): Promise<Comment[]>;
+  searchIssues(query: string): Promise<Issue[]>;
+  addComment(issueId: string, body: string): Promise<void>;
+  linkForgeTask(issueId: string, forgeTaskId: string): Promise<void>;
+}
+```
+
+**Built-in Providers:**
+
+| Provider | Implementation | Auth |
+|----------|---------------|------|
+| **GitHub** (default) | Via `gh` CLI | gh auth |
+| **Linear** | Via Linear API | API key |
+| **Jira** | Via Jira REST API | API token |
+| **None** | Manual — user provides context directly | N/A |
+
+**Configuration:**
+
+```json
+// .forge/config.json
+{
+  "issueTracker": {
+    "provider": "github",
+    "config": {
+      "repo": "owner/repo"
+    }
+  }
+}
+```
+
+---
+
+## 10. Agent Runtime: Abstraction with CLI-First, SDK-Later
+
+**Decision:** Start with Claude Code CLI via tmux (works with Teams plan). Claude Agent SDK becomes the preferred runtime when API credits are available.
+
+**Rationale:**
+- The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) provides programmatic access to the same agent loop that powers Claude Code, with type-safe TypeScript API, cost tracking, and structured error handling
+- However, the CLI approach works with existing Teams plan subscriptions and requires no API credits
+- An agent runtime abstraction lets us swap between runtimes without changing the rest of the system
+
+**Interface:**
+
+```typescript
+interface AgentRuntime {
+  name: string;
+  spawn(config: AgentConfig): Promise<AgentSession>;
+  attach(sessionId: string): Promise<AgentSession>;
+  list(): Promise<AgentSession[]>;
+}
+
+interface AgentSession {
+  id: string;
+  role: string;
+  status: "running" | "idle" | "completed" | "failed";
+  send(message: string): Promise<void>;
+  interrupt(): Promise<void>;
+  onMessage(handler: (msg: AgentMessage) => void): void;
+  cost?: number;
+}
+```
+
+**Built-in Runtimes:**
+
+| Runtime | When to use | Billing |
+|---------|------------|---------|
+| `claude-cli` | Works with Claude Teams plan subscriptions | Subscription |
+| `claude-sdk` | Full programmatic control, cost tracking | API credits |
+
+**Start with `claude-cli` (tmux)** since it works with the existing Teams plan. The `claude-sdk` runtime becomes available when API credits are an option, and provides a significantly better developer experience for orchestration.
+
+---
+
+## 11. Initialization Modes: Standard, Stealth, Branch
+
+**Decision:** Forge supports three initialization modes: standard (commits `.forge/` to repo), stealth (fully local via `.git/info/exclude`), and branch (commits to a separate git branch).
+
+**Rationale:**
+- Standard mode is ideal for teams that want shared visibility into Forge state
+- Stealth mode is essential for using Forge on shared repos without polluting the repo or requiring team buy-in. Uses `.git/info/exclude` (repo-local gitignore that is not committed and not in `.gitignore`)
+- Branch mode is a middle ground — Forge data is in git (versioned, backed up) but on a separate branch that does not pollute `main`
+- Inspired by Beads, which offers similar initialization modes
+
+**Alternatives Considered:**
+- **Standard-only** — would prevent adoption on shared repos where not everyone uses Forge
+- **Gitignore-based stealth** — modifying `.gitignore` is visible to teammates and could cause confusion

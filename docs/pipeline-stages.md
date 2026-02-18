@@ -2,7 +2,7 @@
 
 > The structured pipeline that transforms vague requirements into merged PRs.
 
-Related: [[Forge - Implementation Outline]] | [[Forge - Technical Decisions]] | [[Forge - Data Plane Design]]
+Related: [Forge - Implementation Outline](./implementation-outline.md) | [Forge - Technical Decisions](./technical-decisions.md) | [Forge - Data Plane Design](./data-plane-design.md)
 
 ---
 
@@ -12,15 +12,15 @@ Forge's pipeline has 6 stages. The first 3 are collaborative (human + agent), th
 
 ```
 GitHub Issue (vague)
-  Stage 1 → PRD (.forge/specs/issue-<n>-prd.md)
-  Stage 2 → Technical Spec (.forge/specs/issue-<n>-spec.md)
+  Stage 1 → PRD (.forge/issues/issue-<n>/prd.md)
+  Stage 2 → Technical Spec (.forge/issues/issue-<n>/spec.md)
   Stage 3 → Task Graph (forge tasks with dependencies)
   Stage 4 → Completed Branches (parallel agent work)
   Stage 5 → Feature Branch (merge queue output)
   Stage 6 → Merged PR
 ```
 
-The first three stages are the planning pipeline — they map to Layers 0 and 1 in [[Forge - Implementation Outline]] and can deliver value immediately even before the execution machinery (Layers 2–4) exists. The final three stages are the execution pipeline, where agents work autonomously with minimal developer involvement.
+The first three stages are the planning pipeline — they map to Layers 0 and 1 in [Forge - Implementation Outline](./implementation-outline.md) and can deliver value immediately even before the execution machinery (Layers 2–4) exists. The final three stages are the execution pipeline, where agents work autonomously with minimal developer involvement.
 
 Each stage transition is explicit: the developer runs a command to advance to the next stage, or automation handles it when a stage completes. There are no hidden state machines.
 
@@ -29,7 +29,7 @@ Each stage transition is explicit: the developer runs a command to advance to th
 ## Stage 1: PRD Refinement
 
 **Input:** A GitHub Issue (often vague or incomplete)
-**Output:** A PRD document at `.forge/specs/issue-<number>-prd.md`
+**Output:** A PRD document at `.forge/issues/issue-<number>/prd.md`
 **Mode:** Interactive dialogue between human and agent
 **CLI entry point:** `forge refine <github-issue-number>`
 
@@ -48,7 +48,7 @@ forge refine 847
 # Pulls issue #847 from GitHub
 # Reads the codebase for relevant context
 # Starts an interactive dialogue session
-# Saves output to .forge/specs/issue-847-prd.md
+# Saves output to .forge/issues/issue-847/prd.md
 # Commits the file with: git commit -m "forge: add PRD for issue #847"
 ```
 
@@ -140,20 +140,20 @@ The `---` section delimiters and consistent heading names are important for Stag
 ## Stage 2: Technical Spec
 
 **Input:** A PRD from Stage 1
-**Output:** A technical spec at `.forge/specs/issue-<number>-spec.md`
+**Output:** A technical spec at `.forge/issues/issue-<number>/spec.md`
 **Mode:** Agent-driven with human review
-**CLI entry point:** `forge spec .forge/specs/issue-<number>-prd.md`
+**CLI entry point:** `forge spec .forge/issues/issue-<number>/prd.md`
 
 ### How It Works
 
 The developer runs `forge spec` pointing at the PRD file. An agent reads the PRD, then explores the codebase to understand the implementation landscape, and drafts a technical spec. This is not an interactive interview — the agent works through the codebase on its own, then presents the spec for developer review.
 
 ```bash
-forge spec .forge/specs/issue-847-prd.md
+forge spec .forge/issues/issue-847/prd.md
 # Agent reads the PRD
 # Agent explores codebase: greps for relevant files, reads existing patterns
 # Agent drafts the spec
-# Saves to .forge/specs/issue-847-spec.md
+# Saves to .forge/issues/issue-847/spec.md
 # Opens the spec in $EDITOR for developer review
 # Developer can iterate with the agent in the same session
 ```
@@ -185,7 +185,7 @@ Features typically touch 1–3 modules. A feature that adds a new booking type m
 # Technical Spec: <Issue Title>
 
 **Issue:** #<number>
-**PRD:** [[issue-<number>-prd]]
+**PRD:** `issue-<number>-prd.md`
 **Date:** <ISO date>
 **Author:** forge/spec-agent
 
@@ -300,14 +300,16 @@ export const BookingSchema = z.object({
 **Input:** A technical spec from Stage 2
 **Output:** Forge tasks in the task graph (with dependencies)
 **Mode:** Agent-driven with human approval
-**CLI entry point:** `forge decompose .forge/specs/issue-<number>-spec.md`
+**CLI entry point:** `forge decompose .forge/issues/issue-<number>/spec.md`
+
+**Alternative (Layer 0):** `forge plan .forge/issues/issue-<number>/spec.md --markdown` produces a markdown plan file at `.forge/issues/issue-<number>/plan.md` instead of tasks in the task graph. This gives the Layer 0 experience (useful immediately, no data plane needed) with the same command. Without the `--markdown` flag, `forge plan` generates structured tasks in the task graph (Layer 1+).
 
 ### How It Works
 
 The developer runs `forge decompose` pointing at the spec. An agent reads the spec and creates a set of Forge tasks with proper dependency ordering. The developer then reviews the task graph and approves or adjusts before execution begins.
 
 ```bash
-forge decompose .forge/specs/issue-847-spec.md
+forge decompose .forge/issues/issue-847/spec.md
 # Agent reads the spec
 # Creates an epic linked to GitHub Issue #847
 # Creates child tasks with dependencies
@@ -367,10 +369,10 @@ Each task created by decomposition includes:
   "id": "fg-c3d4",
   "parentId": "fg-a1b2",
   "title": "Add private-charter to BookingSchema zod type",
-  "description": "In `packages/polaris-adventures-js/src/schemas/booking.ts`, add 'private-charter' to the BookingType enum. Also add an optional `charterDetails` field with the shape defined in the spec. Run `pnpm turbo test --filter=polaris-adventures-js` to verify. See spec: .forge/specs/issue-847-spec.md#data-model-changes",
+  "description": "In `packages/polaris-adventures-js/src/schemas/booking.ts`, add 'private-charter' to the BookingType enum. Also add an optional `charterDetails` field with the shape defined in the spec. Run `pnpm turbo test --filter=polaris-adventures-js` to verify. See spec: .forge/issues/issue-847/spec.md#data-model-changes",
   "status": "ready",
   "dependencies": [],
-  "sourceSpec": ".forge/specs/issue-847-spec.md",
+  "sourceSpec": ".forge/issues/issue-847/spec.md",
   "sourceIssue": 847,
   "acceptanceCriteria": [
     "BookingType enum includes 'private-charter'",
@@ -469,10 +471,10 @@ Workers do not wait for instructions between tasks. When a task is complete, the
 
 ```bash
 forge ready --epic fg-a1b2    # Any more tasks ready?
-forge sling fg-e5f6 worker-1  # Pick up the next task
+forge dispatch fg-e5f6 worker-1  # Pick up the next task
 ```
 
-This is the propulsion principle from Layer 2 of [[Forge - Implementation Outline]]: agents keep moving without manual nudging. The coordinator (or the developer) doesn't need to hand-hold each transition.
+This is the propulsion principle from Layer 2 of [Forge - Implementation Outline](./implementation-outline.md): agents keep moving without manual nudging. The coordinator (or the developer) doesn't need to hand-hold each transition.
 
 ### Key Design Details
 
@@ -630,8 +632,8 @@ Closes #847
 
 ## Spec
 
-Full technical spec: `.forge/specs/issue-847-spec.md`
-PRD: `.forge/specs/issue-847-prd.md`
+Full technical spec: `.forge/issues/issue-847/spec.md`
+PRD: `.forge/issues/issue-847/prd.md`
 
 ---
 
@@ -690,7 +692,7 @@ The developer's involvement is front-loaded. The planning stages (1–3) require
 
 ## The "Ralph Wiggum" Loop
 
-Once tasks exist in the approved graph, the execution engine runs a simple loop. Named after the characterization of agents that just happily pick up the next task without needing direction, it is the core of Stage 4 and the heart of Layer 4 in [[Forge - Implementation Outline]]:
+Once tasks exist in the approved graph, the execution engine runs a simple loop. Named after the characterization of agents that just happily pick up the next task without needing direction, it is the core of Stage 4 and the heart of Layer 4 in [Forge - Implementation Outline](./implementation-outline.md):
 
 ```
 while (forge ready --epic <epic-id> has tasks):
@@ -714,7 +716,7 @@ while (forge ready --epic <epic-id> has tasks):
 
 Multiple agents running this loop in parallel, against the same task graph, is the "factory." Each agent is independently simple — it just runs the loop. The coordination happens at the task graph level (dependency tracking, status transitions, the merge queue), not at the agent level. Agents don't need to know about each other; they only need to know about their task.
 
-This is why the task graph design (Layer 1 in [[Forge - Implementation Outline]], detailed in [[Forge - Data Plane Design]]) is the critical foundation. Without a reliable, concurrent-safe task graph, the execution loop falls apart. With it, adding more agents is just a matter of running more loops.
+This is why the task graph design (Layer 1 in [Forge - Implementation Outline](./implementation-outline.md), detailed in [Forge - Data Plane Design](./data-plane-design.md)) is the critical foundation. Without a reliable, concurrent-safe task graph, the execution loop falls apart. With it, adding more agents is just a matter of running more loops.
 
 ---
 
@@ -724,8 +726,8 @@ Each stage produces a durable artifact committed to the repository:
 
 | Stage | Artifact | Location |
 |---|---|---|
-| PRD Refinement | `issue-<n>-prd.md` | `.forge/specs/` |
-| Technical Spec | `issue-<n>-spec.md` | `.forge/specs/` |
+| PRD Refinement | `prd.md` | `.forge/issues/issue-<n>/` |
+| Technical Spec | `spec.md` | `.forge/issues/issue-<n>/` |
 | Task Decomposition | Task graph records | `.forge/tasks.jsonl` |
 | Parallel Execution | Git branches | `forge/<task-id>` |
 | Merge Queue | Feature branch | `forge/epic-<epic-id>` |

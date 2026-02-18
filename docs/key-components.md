@@ -181,32 +181,32 @@ This means **context window exhaustion is a non-issue**. Work persists in the da
 
 ---
 
-## 6. Work Dispatch and Tracking (Sling/Convoy System)
+## 6. Work Dispatch and Tracking (Dispatch/Batch System)
 
 ### The Problem
 You need a way to assign work to agents, track batches of related work, and get notified when work completes. Simple task assignment isn't enough at scale — you need batch tracking with dashboard visibility.
 
-### The Solution: Sling + Convoy
+### The Solution: Dispatch + Batch
 
-**Slinging** is the fundamental primitive for dispatching work:
-- `sling` assigns a work item to an agent by placing it on their hook
+**Dispatching** is the fundamental primitive for assigning work:
+- `dispatch` assigns a work item to an agent by placing it on their hook
 - Can target specific agents or let the system choose
 - Can start immediately or defer
 - Can force a session restart
 
-**Convoys** are the batch tracking layer:
-- A convoy wraps a set of related work items into a trackable delivery unit
-- Convoys persist after work completes (unlike the worker swarms that execute them)
-- Even single-item work gets auto-wrapped in a convoy for dashboard visibility
-- Convoys track cross-project work — a single feature touching multiple repos is one convoy
+**Batches** are the batch tracking layer:
+- A batch wraps a set of related work items into a trackable delivery unit
+- Batches persist after work completes (unlike the worker swarms that execute them)
+- Even single-item work gets auto-wrapped in a batch for dashboard visibility
+- Batches track cross-project work — a single feature touching multiple repos is one batch
 
-**Convoy vs. Swarm:**
-- **Convoy** = permanent tracking identifier. The *what*.
-- **Swarm** = ephemeral group of agents actively working on convoy issues. The *who*.
+**Batch vs. Swarm:**
+- **Batch** = permanent tracking identifier. The *what*.
+- **Swarm** = ephemeral group of agents actively working on batch issues. The *who*.
 
-Multiple swarms can attack the same convoy over time. When one batch of agents finishes and some issues remain, the monitor will recycle new agents and push them at the remaining work.
+Multiple swarms can attack the same batch over time. When one group of agents finishes and some issues remain, the monitor will recycle new agents and push them at the remaining work.
 
-**Convoy lifecycle:** OPEN (active tracking) → CLOSED (all issues resolved, notification sent). Adding new issues to a closed convoy reopens it.
+**Batch lifecycle:** OPEN (active tracking) → CLOSED (all issues resolved, notification sent). Adding new issues to a closed batch reopens it.
 
 ---
 
@@ -318,7 +318,7 @@ The terminal multiplexer provides:
 - **Session management** — Each agent runs in its own named session
 - **Session groups** — Workers grouped by role and project, navigable with next/previous bindings
 - **Session snooping** — Peek at what any agent is doing without switching to it
-- **Status lines** — Custom status bars showing agent state, rig info, convoy progress
+- **Status lines** — Custom status bars showing agent state, rig info, batch progress
 - **Copy mode** — Pause output and scroll back through agent activity
 - **Persistence** — Sessions survive terminal disconnects
 - **Extensibility** — Custom popups, views, key bindings per your workflow
@@ -383,7 +383,7 @@ If you were building an agent orchestration system from scratch, the components 
 1. **Persistent work tracking** — Git-backed issue graph (the data plane)
 2. **Agent identity** — Persistent identities separate from ephemeral sessions
 3. **Propulsion principle** — Hooks + autonomous startup behavior
-4. **Work dispatch** — Sling work to agents, track with convoys
+4. **Work dispatch** — Dispatch work to agents, track with batches
 5. **Workflow molecules** — Durable multi-step process execution
 6. **Merge queue** — Dedicated AI-powered merge processing
 7. **Health monitoring** — Hierarchical patrol system with nudging

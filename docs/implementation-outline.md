@@ -3,10 +3,10 @@
 > An agent orchestration system for managing AI coding agents through a structured pipeline, from vague requirements to merged PRs.
 
 **Related documents:**
-- [[Key Components of Agent Orchestration Systems]]
-- [[Forge - Technical Decisions]]
-- [[Forge - Data Plane Design]]
-- [[Forge - Pipeline Stages]]
+- [Key Components of Agent Orchestration Systems](./key-components.md)
+- [Forge - Technical Decisions](./technical-decisions.md)
+- [Forge - Data Plane Design](./data-plane-design.md)
+- [Forge - Pipeline Stages](./pipeline-stages.md)
 
 ---
 
@@ -34,15 +34,15 @@ The system is built in layers, where each layer is independently useful.
 
 **What it does:**
 - A prompted Claude Code workflow that helps refine a GitHub Issue into a PRD through structured dialogue
-- Outputs a markdown spec committed to `.forge/specs/`
+- Outputs a markdown spec committed to `.forge/issues/issue-<number>/`
 - Optionally decomposes the spec into a markdown task plan
 - You then work with a single agent as you do today, just with a better starting point
 
 **What to build:**
-- [ ] `.forge/` directory structure and `forge init` command
-- [ ] `forge refine <github-issue-number>` — pulls issue context from GitHub, starts a PRD refinement conversation, saves output to `.forge/specs/issue-<number>.md`
+- [ ] `.forge/` directory structure and `forge init` command (supports `--stealth` and `--branch` modes)
+- [ ] `forge refine <github-issue-number>` — pulls issue context from GitHub, starts a PRD refinement conversation, saves output to `.forge/issues/issue-<number>/prd.md`
 - [ ] `forge spec <spec-file>` — takes a PRD and produces a technical spec through agent dialogue
-- [ ] `forge plan <spec-file>` — decomposes a spec into a markdown task plan
+- [ ] `forge plan <spec-file>` — decomposes a spec into a markdown task plan (with `--markdown` flag for Layer 0 markdown output to `.forge/issues/issue-<number>/plan.md`)
 - [ ] Prompt templates for each stage (stored in Forge's own repo)
 
 **Dependencies:** GitHub CLI (`gh`), Claude Code CLI
@@ -72,7 +72,7 @@ The system is built in layers, where each layer is independently useful.
 - [ ] `forge plan <spec-file>` upgraded to produce tasks instead of markdown
 - [ ] Agent-friendly JSON output mode (`--json` flag on all commands)
 
-**Detailed design:** [[Forge - Data Plane Design]]
+**Detailed design:** [Forge - Data Plane Design](./data-plane-design.md)
 
 **Dependencies:** Layer 0 (specs feed into task decomposition)
 
@@ -86,13 +86,13 @@ The system is built in layers, where each layer is independently useful.
 - Agents have persistent identities in the task graph (separate from ephemeral Claude Code sessions)
 - Each agent has a "hook" — a designated slot where work is assigned
 - The propulsion principle: on startup, agents check their hook and begin working immediately
-- `forge sling` dispatches work to agents
+- `forge dispatch` dispatches work to agents
 - `forge handoff` lets agents gracefully restart when context fills up
 
 **What to build:**
 - [ ] Agent identity records in the task graph (role, name, hook, status)
 - [ ] Hook mechanism — pinned tasks that represent an agent's current assignment
-- [ ] `forge sling <task-id> <agent>` — assign work to an agent's hook
+- [ ] `forge dispatch <task-id> <agent>` — assign work to an agent's hook
 - [ ] `forge hook` — agent reads its current assignment
 - [ ] `forge handoff` — agent saves state, cleans up, and restarts
 - [ ] `forge nudge <agent>` — send a kick to an agent's tmux session
@@ -142,8 +142,8 @@ The system is built in layers, where each layer is independently useful.
 - [ ] `forge mq process` — Merge Processor works through the queue
 - [ ] Conflict resolution strategy (attempt auto-merge, escalate to human if needed)
 - [ ] PR creation via `gh pr create` with structured description
-- [ ] Convoy/batch tracking — group tasks into a deliverable unit
-- [ ] `forge convoy create`, `forge convoy status`, `forge convoy list`
+- [ ] Batch tracking — group tasks into a deliverable unit
+- [ ] `forge batch create`, `forge batch status`, `forge batch list`
 
 **Dependencies:** Layer 3 (needs workers producing merge requests)
 
@@ -210,7 +210,7 @@ Note: Layers 5 and 6 may be reordered or built incrementally. Workflow templates
 
 ## Open Questions
 
-- **GitHub Issues sync:** Should Forge pull GitHub Issues into the task graph, or keep them as a separate upstream? Initial recommendation: keep them separate — Forge tasks are agent-scoped decompositions of human-scoped GitHub Issues.
-- **Multi-repo support:** Start single-repo. Add rig-like multi-repo support when/if needed.
-- **Team rollout:** Forge should work as a standalone CLI that any developer can install. Team-shared state (if needed) can sync through git via the JSONL file.
-- **API vs CLI agents:** Start with Claude Code CLI sessions. API-based agents are a future optimization.
+- **GitHub Issues sync:** Should Forge pull GitHub Issues into the task graph, or keep them as a separate upstream? Initial recommendation: keep them separate — Forge tasks are agent-scoped decompositions of human-scoped GitHub Issues. The issue tracker provider abstraction (see [Technical Decisions](./technical-decisions.md) #9) decouples Forge from any specific tracker.
+- **Multi-repo support:** Start single-repo. The ID prefix system is designed into Layer 1 from the start (`config.json` `idPrefix` field). Multi-repo support via `~/.forge/` global home directory, project registration, and cross-project batch tracking can be added later without breaking changes. See [Data Plane Design](./data-plane-design.md) for the full multi-repo architecture.
+- **Team rollout:** Forge should work as a standalone CLI that any developer can install. Team-shared state (if needed) can sync through git via the JSONL file. Stealth mode (`forge init --stealth`) allows individual adoption on shared repos without team buy-in.
+- **API vs CLI agents:** Start with Claude Code CLI sessions via tmux (`claude-cli` runtime). The Claude Agent SDK (`claude-sdk` runtime) becomes the preferred option when API credits are available, providing programmatic control, cost tracking, and structured error handling. The agent runtime abstraction (see [Technical Decisions](./technical-decisions.md) #10) ensures this is a clean swap.

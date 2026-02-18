@@ -2,7 +2,7 @@
 
 The persistent, git-backed task graph that serves as Forge's foundation. Inspired by Beads but built in TypeScript with SQLite + JSONL.
 
-Related: [[Forge - Implementation Outline]] · [[Forge - Technical Decisions]] · [[Key Components of Agent Orchestration Systems]]
+Related: [Forge - Implementation Outline](./implementation-outline.md) · [Forge - Technical Decisions](./technical-decisions.md) · [Key Components of Agent Orchestration Systems](./key-components.md)
 
 ---
 
@@ -25,9 +25,14 @@ Every task ever created lives in `.forge/tasks.jsonl`. Git tracks it. The SQLite
 .forge/
   config.json        — project config (name, ID prefix, settings)
   tasks.jsonl        — git-tracked task data (append-optimized portable format)
-  specs/             — generated specs and plans from the pipeline
-    <task-id>.spec.md
-    <task-id>.plan.md
+  issues/            — per-issue artifacts from the pipeline
+    issue-123/
+      prd.md         — from forge refine
+      spec.md        — from forge spec
+      plan.md        — from forge plan --markdown
+    issue-456/
+      prd.md
+      spec.md
   forge.db           — SQLite database (gitignored)
   hooks/             — git hook scripts (symlinked into .git/hooks/)
     post-merge
@@ -102,7 +107,7 @@ export interface Task {
 
 ### Field Notes
 
-**`id`** — Hash-based, not sequential. See [[#Hash-Based ID Generation]]. The prefix is configurable per project (`config.json` → `idPrefix`).
+**`id`** — Hash-based, not sequential. See [Hash-Based ID Generation](#hash-based-id-generation). The prefix is configurable per project (`config.json` → `idPrefix`).
 
 **`description`** — Markdown string. Conventions: use a `## Acceptance Criteria` section so agents know when the task is done. The pipeline spec generator populates this field.
 
@@ -327,7 +332,7 @@ SQLite is now current with all merged changes
 | Two branches close the same task with different reasons | Last `updated_at` wins. Acceptable: tasks are usually owned by one agent at a time. |
 | Two branches add the same dependency | Dependency table `PRIMARY KEY (from_id, to_id, dep_type)` makes the UPSERT idempotent. |
 
-The system deliberately chooses **last-write-wins** over operational transforms or CRDTs. For a task graph, this is correct: an agent either owns a task or it doesn't. The `assignee` field and the claiming transaction (see [[#Core Queries]]) prevent two agents from simultaneously owning the same task in normal operation.
+The system deliberately chooses **last-write-wins** over operational transforms or CRDTs. For a task graph, this is correct: an agent either owns a task or it doesn't. The `assignee` field and the claiming transaction (see [Core Queries](#core-queries)) prevent two agents from simultaneously owning the same task in normal operation.
 
 ### Git Hook Scripts
 
@@ -572,19 +577,47 @@ All commands are invoked as `forge <command>` (the binary is the `forge` executa
 Initialize a `.forge/` directory in the current git repository.
 
 ```bash
-forge init [--prefix <prefix>] [--name <project-name>]
+forge init [--prefix <prefix>] [--name <project-name>] [--stealth] [--branch <branch-name>]
 
 # Examples
 forge init
 forge init --prefix myp --name "My Project"
+
+# Stealth — fully local, invisible to teammates
+forge init --stealth
+
+# Branch — uses a separate git branch for forge data
+forge init --branch forge-data
 ```
 
 Actions:
-1. Creates `.forge/config.json`, `.forge/tasks.jsonl`, `.forge/specs/`
+1. Creates `.forge/config.json`, `.forge/tasks.jsonl`, `.forge/issues/`
 2. Creates and makes executable `.forge/hooks/pre-commit` and `.forge/hooks/post-merge`
 3. Symlinks hooks into `.git/hooks/`
 4. Appends `.forge/forge.db*` to `.gitignore`
 5. Runs the SQLite schema migration
+
+**Stealth mode** (`--stealth`):
+1. Creates `.forge/` directory as normal
+2. Adds `.forge/` to `.git/info/exclude` (repo-local gitignore — not committed, not in `.gitignore`)
+3. Does NOT install git hooks (no JSONL sync since nothing is committed)
+4. SQLite works normally for local queries
+5. JSONL is written but stays local (useful for backup/export)
+6. All Forge commands work identically — agents cannot tell the difference
+
+What you lose in stealth: no git-based sync or history for task data, no collaboration with other Forge users on the same repo, task data only exists on your machine.
+
+What you keep: full task graph, all queries, all CLI commands, agent execution, dispatch, batches — everything works. Specs and PRDs in `.forge/issues/` are also gitignored (stealth is all-or-nothing).
+
+**Upgrade path:**
+```bash
+# Switch from stealth to standard
+forge init --upgrade
+# This: removes .forge/ from .git/info/exclude,
+# adds .forge/ tracking to git, installs hooks, commits
+```
+
+**Branch mode** (`--branch`) is a middle ground — your Forge data is in git (versioned, backed up) but on a separate branch that does not pollute `main`. Useful for teams where some people use Forge and others do not.
 
 ```json
 // .forge/config.json (written by forge init)
@@ -912,7 +945,7 @@ The `metadata` field is the agent's scratchpad. It is a free-form JSON object th
 ```bash
 forge task update fg-a3f8 \
   --meta-set spec_generated_at="2026-02-18T10:00:00.000Z" \
-  --meta-set spec_path=".forge/specs/fg-a3f8.spec.md" \
+  --meta-set spec_path=".forge/issues/issue-12/spec.md" \
   --meta-set plan_approved=true \
   --meta-set pr_url="https://github.com/org/repo/pull/9"
 ```
@@ -927,6 +960,12 @@ export interface ForgeConfig {
   idPrefix: string;   // 2-4 lowercase alphanumeric chars, e.g. "fg"
   version: number;    // schema version, currently 1
   created_at: string; // ISO timestamp of forge init
+  initMode?: 'standard' | 'stealth' | 'branch'; // default: 'standard'
+  branchName?: string; // only used when initMode === 'branch'
+  issueTracker?: {
+    provider: 'github' | 'linear' | 'jira' | 'none'; // default: 'github'
+    config: Record<string, unknown>; // provider-specific config
+  };
   settings?: {
     gcOnExport?: boolean;        // default: true — deduplicate JSONL on export
     defaultPriority?: Priority;  // default: 2 (medium)
@@ -934,6 +973,43 @@ export interface ForgeConfig {
   };
 }
 ```
+
+---
+
+## Multi-Repo Support
+
+Forge supports orchestrating work across multiple repositories through a global home directory that sits above individual projects.
+
+### Architecture
+
+```
+~/.forge/                          (forge home — global config)
+  config.json                      (registered projects, global settings)
+  agents.jsonl                     (global agent identities)
+  batches.jsonl                    (cross-project batch tracking)
+
+~/code/project-a/.forge/           (per-project)
+  config.json
+  tasks.jsonl
+  forge.db
+
+~/code/project-b/.forge/           (per-project)
+  config.json
+  tasks.jsonl
+  forge.db
+```
+
+### Key Design Elements
+
+1. **Forge home directory** (`~/.forge/`) — sits above individual projects, holds global config, agent identities, and cross-project batch tracking
+2. **Project registration:** `forge project add <name> <path>` registers a repo
+3. **ID prefix routing:** Each project gets a unique prefix (e.g., `pa-` for polaris-adventures, `fg-` for forge). Task IDs route to the correct project's database.
+4. **Cross-project batches:** A batch can track tasks across multiple projects
+5. **Agent mobility:** Agents can create worktrees in any registered project via `forge worktree <project>`
+
+### Design-Now, Build-Later
+
+The ID prefix system should be designed into Layer 1 from the start (the `config.json` `idPrefix` field). Everything else can be added later without breaking changes. Start single-repo; the prefix is just a nice namespace even for one project.
 
 ---
 
@@ -958,4 +1034,4 @@ export interface ForgeConfig {
 
 ---
 
-*See also: [[Forge - Implementation Outline]] for the overall system architecture, [[Forge - Technical Decisions]] for rationale on technology choices, and [[Key Components of Agent Orchestration Systems]] for the conceptual background.*
+*See also: [Forge - Implementation Outline](./implementation-outline.md) for the overall system architecture, [Forge - Technical Decisions](./technical-decisions.md) for rationale on technology choices, and [Key Components of Agent Orchestration Systems](./key-components.md) for the conceptual background.*
